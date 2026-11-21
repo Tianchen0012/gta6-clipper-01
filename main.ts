@@ -7,16 +7,49 @@
 // Outside the grader's container, MAKEFUN_BOT_DIR and MAKEFUN_OUTPUT_DIR stand in for /bot and /output:
 //   mkdir -p out && MAKEFUN_BOT_DIR=. MAKEFUN_OUTPUT_DIR=out node main.ts
 
-import { copyFileSync, mkdirSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const BOT_DIR = process.env.MAKEFUN_BOT_DIR ?? '/bot';
 const OUTPUT_DIR = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
+// Validate VIDEO.json before copying: it must be a JSON object naming a
+// YouTube video (shorts, watch or youtu.be link) with an 11-character id.
+// This keeps a bad placeholder or a typo from ever reaching the gate.
+function validateVideoJson(text: string): void {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error('VIDEO.json is not valid JSON');
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('VIDEO.json must be a JSON object');
+  }
+  const url = (parsed as Record<string, unknown>).url;
+  if (typeof url !== 'string' || url.length === 0) {
+    throw new Error('VIDEO.json must name a url string');
+  }
+  const match = url.match(
+    /^(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com\/(?:shorts\/|watch\?v=)|youtu\.be\/)([A-Za-z0-9_-]{11})/,
+  );
+  if (!match) {
+    throw new Error(`VIDEO.json url is not a YouTube video address: ${url}`);
+  }
+}
+
 mkdirSync(OUTPUT_DIR, { recursive: true });
 try {
-  copyFileSync(join(BOT_DIR, 'VIDEO.json'), join(OUTPUT_DIR, 'VIDEO.json'));
+  const source = join(BOT_DIR, 'VIDEO.json');
+  const text = readFileSync(source, 'utf8');
+  validateVideoJson(text);
+  const dest = join(OUTPUT_DIR, 'VIDEO.json');
+  copyFileSync(source, dest);
+  const copied = readFileSync(dest, 'utf8');
+  if (copied !== text) {
+    throw new Error('copied VIDEO.json does not match the source');
+  }
 } catch (err) {
-  console.error(`VIDEO.json could not be copied from ${BOT_DIR}: ${(err as Error).message}`);
+  console.error(`VIDEO.json could not be validated and copied: ${(err as Error).message}`);
   process.exit(1);
 }
